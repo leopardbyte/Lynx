@@ -1,0 +1,11 @@
+[
+  {
+    "modid": "endermanfinder",
+    "name": "OptiFine_1.8.9_HD_U_L5",
+    "version": "1.8.9",
+    "description": "OptiFine is a Minecraft optimization mod.",
+    "credits": "Thanks to the Minecraft community for feedback.",
+    "authorList": ["sp614x"],
+    "url": "https://optifine.net/"
+  }
+]

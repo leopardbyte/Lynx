@@ -1,0 +1,1 @@
+start "" "C:\Users\jonat\AppData\Local\Programs\Microsoft VS Code\Code.exe" C:\Users\jonat\Desktop\tst\catworld
