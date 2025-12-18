@@ -278,10 +278,6 @@ public class EndermanFinder {
     private boolean isTargetingEnderman = false;
     private static final float MAX_ROTATION_SPEED = 16.0f;
 
-    private Set<BlockPos> blockedCache = new HashSet<>();
-    private long lastCacheClear = 0;
-    private static final long CACHE_CLEAR_INTERVAL = 700; // 30 seconds
-
     public static String targetEntityType = "enderman"; // changed from private
     
 
@@ -312,7 +308,7 @@ public class EndermanFinder {
 
     Minecraft mc = Minecraft.getMinecraft();
 
-    private List<BlockPos> blockedPositions = new ArrayList<>();
+    private Set<BlockPos> blockedPositions = new HashSet<>();
     public static KeyAndClickActions keyAndClickActions = new KeyAndClickActions();
     public static boolean keyAndClickActionsEnabled = false;
     public static boolean autoWalkEnabled = false;
@@ -515,37 +511,41 @@ public class EndermanFinder {
     public void onPlayerJoin(PlayerEvent.PlayerLoggedInEvent event) {
         EntityPlayer player = event.player;
         
-        // Add a short delay before sending the message
-        Minecraft.getMinecraft().addScheduledTask(() -> {
+        // Use scheduler to delay message without blocking the main thread
+        new Thread(() -> {
             try {
                 Thread.sleep(2000);
             } catch (InterruptedException e) {
-                e.printStackTrace();
+                Thread.currentThread().interrupt();
+                return;
             }
             
-            String udid = getPlayerUDID(player);
-        
-            if (ALLOWED_UDID.equals(udid)) {
-                IChatComponent message = new ChatComponentText("§6§l[Lynx] §bYou are allowed to use the Zealot mod | ");
-                IChatComponent enjoyText = new ChatComponentText("§a§1Enjoy.");
-                message.appendSibling(enjoyText);
-                player.addChatMessage(message);
-                isPlayerAuthorized = true;
-            } else {
-                IChatComponent message = new ChatComponentText("§6§l[Lynx] §cYou are not allowed to use the Zealoft modaaaaaa. | ");
-                
-                IChatComponent link = new ChatComponentText("§bClick here to join our Discord");
-                ChatStyle clickableStyle = new ChatStyle();
-                clickableStyle.setChatClickEvent(new ClickEvent(ClickEvent.Action.OPEN_URL, "https://discord.gg/hBcNz6db"));
-                link.setChatStyle(clickableStyle);
-                
-                message.appendSibling(link);
-                
-                player.addChatMessage(message);
-                isPlayerAuthorized = false;
-                disableModFunctionality();
-            }
-        });
+            // Schedule the message to be sent on the main thread
+            Minecraft.getMinecraft().addScheduledTask(() -> {
+                String udid = getPlayerUDID(player);
+            
+                if (ALLOWED_UDID.equals(udid)) {
+                    IChatComponent message = new ChatComponentText("§6§l[Lynx] §bYou are allowed to use the Zealot mod | ");
+                    IChatComponent enjoyText = new ChatComponentText("§a§1Enjoy.");
+                    message.appendSibling(enjoyText);
+                    player.addChatMessage(message);
+                    isPlayerAuthorized = true;
+                } else {
+                    IChatComponent message = new ChatComponentText("§6§l[Lynx] §cYou are not allowed to use the Zealoft modaaaaaa. | ");
+                    
+                    IChatComponent link = new ChatComponentText("§bClick here to join our Discord");
+                    ChatStyle clickableStyle = new ChatStyle();
+                    clickableStyle.setChatClickEvent(new ClickEvent(ClickEvent.Action.OPEN_URL, "https://discord.gg/hBcNz6db"));
+                    link.setChatStyle(clickableStyle);
+                    
+                    message.appendSibling(link);
+                    
+                    player.addChatMessage(message);
+                    isPlayerAuthorized = false;
+                    disableModFunctionality();
+                }
+            });
+        }).start();
     }
 
     public void toggleKeyAndClickActions() {
@@ -1102,16 +1102,27 @@ public class EndermanFinder {
         }
     
         final int MAX_PATH_LENGTH = 100; // Maximum path length
+        final int MAX_ITERATIONS = 2000; // Limit iterations to prevent lag
     
         PriorityQueue<Node> openSet = new PriorityQueue<>();
         Map<BlockPos, Node> allNodes = new HashMap<>();
+        Set<BlockPos> closedSet = new HashSet<>(); // Track processed nodes
     
-        Node startNode = new Node(start, null, 0, start.distanceSq(end));
+        Node startNode = new Node(start, null, 0, heuristic(start, end));
         openSet.add(startNode);
         allNodes.put(start, startNode);
+        
+        int iterations = 0;
     
-        while (!openSet.isEmpty()) {
+        while (!openSet.isEmpty() && iterations < MAX_ITERATIONS) {
+            iterations++;
             Node current = openSet.poll();
+            
+            // Skip if already processed (more efficient than remove+re-add)
+            if (closedSet.contains(current.pos)) {
+                continue;
+            }
+            closedSet.add(current.pos);
     
             // Check if the path is too long
             if (current.g > MAX_PATH_LENGTH) {
@@ -1128,9 +1139,9 @@ public class EndermanFinder {
             }
     
             for (BlockPos neighbor : getNeighbors(current.pos)) {
-                if (!isWalkable(mc, neighbor)) continue;
+                if (closedSet.contains(neighbor) || !isWalkable(mc, neighbor)) continue;
     
-                double newG = current.g + current.pos.distanceSq(neighbor);
+                double newG = current.g + 1; // Use uniform cost for efficiency
                 Node neighborNode = allNodes.get(neighbor);
     
                 if (neighborNode == null) {
@@ -1138,10 +1149,11 @@ public class EndermanFinder {
                     allNodes.put(neighbor, neighborNode);
                     openSet.add(neighborNode);
                 } else if (newG < neighborNode.g) {
+                    // Instead of removing from queue, add a new entry with lower cost
+                    // The closedSet check above will skip stale entries
                     neighborNode.parent = current;
                     neighborNode.g = newG;
                     neighborNode.f = newG + heuristic(neighbor, end);
-                    openSet.remove(neighborNode);
                     openSet.add(neighborNode);
                 }
             }
@@ -1163,13 +1175,18 @@ public class EndermanFinder {
         EntityPlayerSP player = mc.thePlayer;
         BlockPos playerPos = new BlockPos(player.posX, player.posY, player.posZ);
         
-        // Use a simplified BFS to check if there's a path
+        // Use a simplified BFS with iteration limit to avoid unbounded search
         Queue<BlockPos> queue = new LinkedList<>();
         Set<BlockPos> visited = new HashSet<>();
         queue.offer(playerPos);
         visited.add(playerPos);
+        
+        // Limit BFS iterations to prevent infinite loops and lag
+        final int MAX_BFS_ITERATIONS = 500;
+        int iterations = 0;
     
-        while (!queue.isEmpty()) {
+        while (!queue.isEmpty() && iterations < MAX_BFS_ITERATIONS) {
+            iterations++;
             BlockPos current = queue.poll();
             if (current.equals(pos)) {
                 return false; // Found a path, not sealed
@@ -1184,7 +1201,7 @@ public class EndermanFinder {
             }
         }
     
-        return true; // No path found, considered sealed
+        return true; // No path found or iteration limit reached, considered sealed
     }
     
     // Overload for finding path from player to Enderman
@@ -1193,7 +1210,9 @@ public class EndermanFinder {
     }
 
     private double heuristic(BlockPos a, BlockPos b) {
-        return Math.sqrt(a.distanceSq(b));
+        // Use Manhattan distance instead of sqrt for better performance
+        // Manhattan distance is faster and still admissible for A* on grid
+        return Math.abs(a.getX() - b.getX()) + Math.abs(a.getY() - b.getY()) + Math.abs(a.getZ() - b.getZ());
     }
 
     private List<BlockPos> reconstructPath(Node endNode) {
@@ -1276,24 +1295,8 @@ public class EndermanFinder {
     
 
     private boolean isBlockedPosition(BlockPos pos) {
-        long currentTime = System.currentTimeMillis();
-        if (currentTime - lastCacheClear > CACHE_CLEAR_INTERVAL) {
-            blockedCache.clear();
-            lastCacheClear = currentTime;
-        }
-    
-        if (blockedCache.contains(pos)) {
-            return true;
-        }
-    
-        for (BlockPos blocked : blockedPositions) {
-            if (pos.equals(blocked)) {
-                blockedCache.add(pos);
-                return true;
-            }
-        }
-    
-        return false;
+        // blockedPositions is now a HashSet, O(1) lookup instead of O(n)
+        return blockedPositions.contains(pos);
     }
 
 

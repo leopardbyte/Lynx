@@ -7,27 +7,44 @@ import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
 
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+
 public class OverlayCounter {
     private volatile int killCount = 0; // Thread-safe kill count
     private volatile double hourAverage = 0.0; // Thread-safe average
     private long startTime;
+    private final ScheduledExecutorService scheduler;
 
     public OverlayCounter() {
         this.startTime = System.currentTimeMillis();
         MinecraftForge.EVENT_BUS.register(this);
 
-        // Start a background thread for hourly average calculation
-        new Thread(() -> {
-            while (true) {
-                try {
-                    updateHourlyAverage();
-                    Thread.sleep(1000); // Update every second
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                    break; // Exit thread if interrupted
-                }
+        // Use ScheduledExecutorService for proper shutdown support
+        this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "OverlayCounter-Thread");
+            t.setDaemon(true); // Daemon thread will not prevent JVM shutdown
+            return t;
+        });
+        
+        scheduler.scheduleAtFixedRate(this::updateHourlyAverage, 0, 1, TimeUnit.SECONDS);
+    }
+
+    /**
+     * Shuts down the background scheduler. Should be called when the mod is being unloaded
+     * or when the counter is no longer needed to properly release resources.
+     */
+    public void shutdown() {
+        scheduler.shutdown();
+        try {
+            if (!scheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+                scheduler.shutdownNow();
             }
-        }, "OverlayCounter-Thread").start();
+        } catch (InterruptedException e) {
+            scheduler.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
     }
 
     private void updateHourlyAverage() {
