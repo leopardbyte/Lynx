@@ -131,14 +131,12 @@ public class AntiStuck {
     }
 
     private void delay(int milliseconds) {
-        long startTime = System.currentTimeMillis();
-        while (isRunning && System.currentTimeMillis() - startTime < milliseconds) {
-            try {
-                Thread.sleep(10);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return;
-            }
+        // Use a single sleep instead of busy-waiting loop to reduce CPU usage
+        if (!isRunning) return;
+        try {
+            Thread.sleep(milliseconds);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 }
