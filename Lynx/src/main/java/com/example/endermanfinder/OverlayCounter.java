@@ -31,6 +31,10 @@ public class OverlayCounter {
         scheduler.scheduleAtFixedRate(this::updateHourlyAverage, 0, 1, TimeUnit.SECONDS);
     }
 
+    /**
+     * Shuts down the background scheduler. Should be called when the mod is being unloaded
+     * or when the counter is no longer needed to properly release resources.
+     */
     public void shutdown() {
         scheduler.shutdown();
         try {
